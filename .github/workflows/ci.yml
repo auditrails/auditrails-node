@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          # vitest 4's rolldown dependency imports node:util's styleText,
+          # unavailable on Node 18 (which is EOL anyway) -- the sdk's own
+          # published "engines": ">=18.0.0" is about runtime compatibility
+          # for consumers, not what's needed to run this dev toolchain.
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
+  audit:
+    name: NPM Vulnerability Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "18"
+      - run: npm ci
+      - name: Run npm audit
+        run: |
+          # Fail on critical, warn on high
+          npm audit --audit-level=critical 2>&1 || {
+            echo "::error::SDK Node.js has critical npm vulnerabilities"
+            exit 1
+          }
+          npm audit --audit-level=high 2>&1 || {
+            echo "::warning::SDK Node.js has high npm vulnerabilities"
+          }
