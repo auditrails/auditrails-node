@@ -1,0 +1,42 @@
+name: Publish
+
+# Triggered by pushing a version tag, e.g. `git tag v1.0.1 && git push origin v1.0.1`.
+# Requires the NPM_TOKEN repo secret: an npm Automation token with publish
+# rights on the @auditrails org/scope (Access Tokens -> Generate New Token
+# -> Automation, on the npm account/org that owns the @auditrails scope).
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write # enables npm provenance attestation
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: npm
+          registry-url: "https://registry.npmjs.org"
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - name: Verify tag matches package.json version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag v$TAG_VERSION does not match package.json version $PKG_VERSION"
+            exit 1
+          fi
+      # Scoped packages (@auditrails/node) default to restricted/private on
+      # npm unless explicitly published as public.
+      - run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
