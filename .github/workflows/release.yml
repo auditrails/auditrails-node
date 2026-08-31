@@ -1,0 +1,65 @@
+# Publishes @auditrails/node to npm when a v* tag is pushed.
+#
+# Manual `npm publish` from a laptop was how the first release happened; this
+# exists so every release after it is reproducible, comes from a clean
+# checkout, and is provenance-signed rather than depending on whose machine
+# ran it.
+#
+# Requires an NPM_TOKEN repository secret: an npm *automation* token, which
+# bypasses 2FA (a classic/publish token will fail the publish if 2FA is on).
+#   npmjs.com -> Access Tokens -> Generate New Token -> Automation
+#
+# Release flow:
+#   1. bump "version" in package.json
+#   2. git tag v1.0.1 && git push origin v1.0.1
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  # Required for npm provenance, which publishes a signed attestation linking
+  # the tarball back to this workflow run.
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          # Matches ci.yml: vitest 4's toolchain needs >=20, independent of
+          # the ">=18" runtime support we publish for consumers.
+          node-version: "20"
+          cache: npm
+          registry-url: "https://registry.npmjs.org"
+
+      - run: npm ci
+
+      # Publish only what CI would have passed. `npm publish` runs the build
+      # itself via prepare, but running the suite first means a broken tag
+      # fails before anything reaches the registry -- npm versions are
+      # immutable, so there is no fixing it afterwards.
+      - run: npm run build
+      - run: npm test
+      - run: npm run typecheck
+
+      # The tag and package.json must agree, or `npm publish` silently ships a
+      # version nobody asked for.
+      - name: Verify tag matches package version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::tag v$TAG does not match package.json version $PKG"
+            exit 1
+          fi
+          echo "publishing $PKG"
+
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
