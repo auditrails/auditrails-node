@@ -1,7 +1,7 @@
 {
   "name": "@auditrails/node",
-  "version": "1.0.0",
-  "description": "Official Node.js SDK for auditrails.io \u2014 tamper-proof audit logging as a service",
+  "version": "1.0.1",
+  "description": "Official Node.js SDK for auditrails.io — tamper-proof audit logging as a service",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
