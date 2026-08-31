@@ -1,7 +1,7 @@
 {
   "name": "@auditrails/node",
   "version": "1.0.0",
-  "description": "Official Node.js SDK for auditrails.io — tamper-proof audit logging as a service",
+  "description": "Official Node.js SDK for auditrails.io \u2014 tamper-proof audit logging as a service",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -20,7 +20,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
-    "prepublishOnly": "npm run build"
+    "prepare": "npm run build"
   },
   "keywords": [
     "audit",
@@ -39,7 +39,13 @@
     "type": "git",
     "url": "https://github.com/auditrails/auditrails-node.git"
   },
+  "bugs": {
+    "url": "https://github.com/auditrails/auditrails-node/issues"
+  },
   "homepage": "https://auditrails.io",
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=18.0.0"
   },
