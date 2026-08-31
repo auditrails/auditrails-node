@@ -1,17 +1,25 @@
 # Publishes @auditrails/node to npm when a v* tag is pushed.
 #
-# Manual `npm publish` from a laptop was how the first release happened; this
-# exists so every release after it is reproducible, comes from a clean
-# checkout, and is provenance-signed rather than depending on whose machine
-# ran it.
+# Authenticates with npm via OIDC trusted publishing, so there is no
+# NPM_TOKEN secret anywhere in this repo. GitHub mints a short-lived identity
+# token for this specific workflow, npm verifies it against the trusted
+# publisher configured on the package, and no long-lived credential ever
+# exists to leak, rotate, or expire.
 #
-# Requires an NPM_TOKEN repository secret: an npm *automation* token, which
-# bypasses 2FA (a classic/publish token will fail the publish if 2FA is on).
-#   npmjs.com -> Access Tokens -> Generate New Token -> Automation
+# This also gets ahead of npm's own deprecation: 2FA-bypass tokens lose
+# direct publish rights in January 2027
+# (https://gh.io/npm-gat-bypass2fa-deprecation), so a token-based release
+# workflow would need replacing anyway.
 #
-# Release flow:
-#   1. bump "version" in package.json
-#   2. git tag v1.0.1 && git push origin v1.0.1
+# One-time setup on npmjs.com, under the package's Access settings:
+#   Organization or user:  auditrails
+#   Repository:            auditrails-node
+#   Workflow filename:     release.yml     (filename only, case-sensitive)
+#   Allowed actions:       npm publish
+#
+# Releasing after that is a version bump and a tag:
+#   npm version patch          # or minor / major
+#   git push && git push --tags
 name: Release
 
 on:
@@ -20,8 +28,8 @@ on:
 
 permissions:
   contents: read
-  # Required for npm provenance, which publishes a signed attestation linking
-  # the tarball back to this workflow run.
+  # Lets GitHub mint the OIDC token npm authenticates against. Without this
+  # the publish falls back to looking for a token and fails.
   id-token: write
 
 jobs:
@@ -30,26 +38,42 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+
       - uses: actions/setup-node@v6
         with:
-          # Matches ci.yml: vitest 4's toolchain needs >=20, independent of
-          # the ">=18" runtime support we publish for consumers.
-          node-version: "20"
-          cache: npm
+          # Trusted publishing needs npm >= 11.5.1 and Node >= 22.14.0.
+          # Node 24 satisfies both, and comfortably clears the >= 20 that
+          # vitest 4's toolchain needs (see ci.yml).
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
+          # npm's guidance is to never cache in a release build: a poisoned
+          # or stale cache entry would end up inside the published tarball.
+          package-manager-cache: false
+
+      # Fail loudly and early rather than at the publish step, where the
+      # error is a confusing auth failure rather than "your npm is too old".
+      - name: Verify npm supports trusted publishing
+        run: |
+          NPM_VERSION="$(npm --version)"
+          echo "npm $NPM_VERSION, node $(node --version)"
+          REQUIRED="11.5.1"
+          if [ "$(printf '%s\n%s\n' "$REQUIRED" "$NPM_VERSION" | sort -V | head -1)" != "$REQUIRED" ]; then
+            echo "::error::npm $NPM_VERSION is too old for OIDC trusted publishing; need >= $REQUIRED"
+            exit 1
+          fi
 
       - run: npm ci
 
-      # Publish only what CI would have passed. `npm publish` runs the build
-      # itself via prepare, but running the suite first means a broken tag
-      # fails before anything reaches the registry -- npm versions are
-      # immutable, so there is no fixing it afterwards.
+      # Publish only what would have passed CI. npm publish runs the build
+      # itself via `prepare`, but running the suite first means a broken tag
+      # fails before anything reaches the registry. npm versions are
+      # immutable, so there is no fixing one afterwards.
       - run: npm run build
       - run: npm test
       - run: npm run typecheck
 
-      # The tag and package.json must agree, or `npm publish` silently ships a
-      # version nobody asked for.
+      # A tag that disagrees with package.json would publish a version nobody
+      # asked for, under a tag that then points at the wrong tree.
       - name: Verify tag matches package version
         run: |
           TAG="${GITHUB_REF_NAME#v}"
@@ -60,6 +84,7 @@ jobs:
           fi
           echo "publishing $PKG"
 
-      - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # No NODE_AUTH_TOKEN. The CLI detects the OIDC token from id-token:
+      # write and authenticates with it. Provenance is attached automatically
+      # under trusted publishing, so --provenance is not needed either.
+      - run: npm publish
